@@ -18,7 +18,7 @@
             --x: 50%;
             --y: 50%;
             --shift-speed: 12000ms;
-            --field-speed: 14000ms;
+            --field-speed: 42000ms;
             --ink: #171717;
             --muted: #6e6e69;
         }
@@ -39,15 +39,16 @@
             top: var(--y);
             left: var(--x);
             z-index: 0;
-            width: clamp(560px, 92vw, 1250px);
-            height: clamp(560px, 92vw, 1250px);
+            width: clamp(620px, 108vw, 1450px);
+            height: clamp(620px, 108vw, 1450px);
             background: radial-gradient(circle,
-                    rgba(255, 255, 255, 0.58) 0,
-                    rgba(255, 255, 255, 0) 70%);
+                    rgba(255, 255, 255, 0.3) 0,
+                    rgba(255, 255, 255, 0.11) 45%,
+                    rgba(255, 255, 255, 0) 80%);
             transform: translate(-50%, -50%);
             transition:
-                top var(--field-speed) cubic-bezier(0.22, 0.61, 0.36, 1),
-                left var(--field-speed) cubic-bezier(0.22, 0.61, 0.36, 1);
+                top var(--field-speed) cubic-bezier(0.42, 0, 0.58, 1),
+                left var(--field-speed) cubic-bezier(0.42, 0, 0.58, 1);
             pointer-events: none;
         }
 
@@ -194,7 +195,9 @@
             border: 0;
             border-radius: 1px;
             cursor: pointer;
+            touch-action: pan-y pinch-zoom;
             -webkit-tap-highlight-color: transparent;
+            -webkit-touch-callout: none;
         }
 
         .gallery .swap {
@@ -219,11 +222,17 @@
             text-align: center;
             white-space: nowrap;
             opacity: 0;
-            transition: opacity 7500ms ease;
+            transition: opacity 8500ms ease;
             pointer-events: none;
         }
 
         .gallery .swap:focus-visible::after {
+            opacity: 1;
+            transition-duration: 2600ms;
+            transition-delay: 3000ms;
+        }
+
+        .gallery .swap.is-title-armed::after {
             opacity: 1;
             transition-duration: 2600ms;
             transition-delay: 3000ms;
@@ -234,6 +243,7 @@
             width: 100%;
             height: auto;
             user-select: none;
+            -webkit-touch-callout: none;
         }
 
         .swap .front {
@@ -269,14 +279,6 @@
         }
 
         .main-art .swap.is-revealed .front {
-            visibility: hidden;
-        }
-
-        .main-art .swap:active>img:first-child {
-            visibility: visible;
-        }
-
-        .main-art .swap:active .front {
             visibility: hidden;
         }
 
@@ -492,6 +494,9 @@
                 ((callback) => setTimeout(callback, 16));
             let deepen = () => { };
             let galleryOpening = false;
+            const suppressedClicks = new WeakSet();
+            const clickTimers = new WeakMap();
+            const recentDirectInput = new WeakMap();
 
             if (!mainSwap || !mainArt || !gallery || !footer) {
                 document.documentElement.classList.remove('js');
@@ -641,13 +646,13 @@
                         const paperSaturation = Math.round(maturity * (4 + atmosphere * 22));
                         const paperLightness = 100 - maturity * (2 + atmosphere * 29);
                         const mutedLightness = 38 - depth * 20;
-                        const fieldTop = 4 + top * 0.92;
+                        const fieldTop = 14 + top * 0.72;
                         const colorSpeed = idle
                             ? 34000 - maturity * 14000
                             : 32000 - maturity * 18000;
                         const fieldSpeed = idle
-                            ? 36000 - maturity * 14000
-                            : 36000 - maturity * 20000;
+                            ? 52000 - maturity * 12000
+                            : 50000 - maturity * 16000;
 
                         root.style.setProperty('--shift-speed', `${Math.round(colorSpeed)}ms`);
                         root.style.setProperty('--field-speed', `${Math.round(fieldSpeed)}ms`);
@@ -668,8 +673,9 @@
                 };
 
                 const followPoint = (clientX, clientY) => {
-                    left = Math.max(0, Math.min(100, clientX / Math.max(innerWidth, 1) * 100));
+                    const horizontal = Math.max(0, Math.min(1, clientX / Math.max(innerWidth, 1)));
                     top = Math.max(0, Math.min(100, clientY / Math.max(innerHeight, 1) * 100));
+                    left = 14 + horizontal * 72;
                     activate(0.18 + top / 100 * 0.82);
                 };
 
@@ -706,11 +712,129 @@
                     if (!firstInput || Date.now() - lastInput < 15000) return;
                     idle = true;
                     atmosphere = 0;
-                    left = 4 + Math.random() * 92;
-                    top = 4 + Math.random() * 92;
+                    left = 20 + Math.random() * 60;
+                    top = 15 + Math.random() * 70;
                     paint();
                 }, 22000);
             }
+
+            const setReveal = (item, reveal) => {
+                item.classList.toggle('is-revealed', reveal);
+
+                if (item !== mainSwap) {
+                    item.setAttribute('aria-pressed', String(reveal));
+                }
+
+                if (reveal) deepen();
+            };
+
+            const armTouchTitle = (item) => {
+                if (item !== mainSwap) item.classList.add('is-title-armed');
+            };
+
+            const disarmTouchTitle = (item) => {
+                if (item !== mainSwap) item.classList.remove('is-title-armed');
+            };
+
+            const suppressNextClick = (item) => {
+                suppressedClicks.add(item);
+                clearTimeout(clickTimers.get(item));
+                clickTimers.set(item, setTimeout(() => {
+                    suppressedClicks.delete(item);
+                    clickTimers.delete(item);
+                }, 500));
+            };
+
+            const installDirectGestures = (item) => {
+                let swipeStart = null;
+
+                const beginSwipe = (id, clientX, clientY) => {
+                    recentDirectInput.set(item, Date.now());
+                    armTouchTitle(item);
+                    swipeStart = {
+                        id,
+                        x: clientX,
+                        y: clientY,
+                        time: Date.now()
+                    };
+                };
+
+                const moveSwipe = (id, clientX, clientY) => {
+                    if (!swipeStart || swipeStart.id !== id) return;
+
+                    if (Math.abs(clientX - swipeStart.x) > 12 || Math.abs(clientY - swipeStart.y) > 12) {
+                        disarmTouchTitle(item);
+                    }
+                };
+
+                const endSwipe = (id, clientX, clientY) => {
+                    if (!swipeStart || swipeStart.id !== id) return;
+
+                    const deltaX = clientX - swipeStart.x;
+                    const deltaY = clientY - swipeStart.y;
+                    const heldFor = Date.now() - swipeStart.time;
+                    swipeStart = null;
+                    disarmTouchTitle(item);
+
+                    if (Math.abs(deltaX) >= 45 && Math.abs(deltaX) > Math.abs(deltaY) * 1.2) {
+                        setReveal(item, deltaX < 0);
+                        suppressNextClick(item);
+                    } else if (heldFor >= 600) {
+                        suppressNextClick(item);
+                    }
+                };
+
+                const cancelSwipe = () => {
+                    swipeStart = null;
+                    disarmTouchTitle(item);
+                };
+
+                item.addEventListener('contextmenu', (event) => {
+                    const directInputWasRecent = Date.now() - (recentDirectInput.get(item) || 0) < 2000;
+                    if (event.pointerType === 'touch' || event.pointerType === 'pen' || directInputWasRecent) {
+                        event.preventDefault();
+                    }
+                }, false);
+
+                if ('PointerEvent' in window) {
+                    item.addEventListener('pointerdown', (event) => {
+                        if (event.pointerType !== 'mouse') {
+                            beginSwipe(event.pointerId, event.clientX, event.clientY);
+                        }
+                    }, false);
+                    item.addEventListener('pointerup', (event) => {
+                        if (event.pointerType !== 'mouse') {
+                            endSwipe(event.pointerId, event.clientX, event.clientY);
+                        }
+                    }, false);
+                    item.addEventListener('pointermove', (event) => {
+                        if (event.pointerType !== 'mouse') {
+                            moveSwipe(event.pointerId, event.clientX, event.clientY);
+                        }
+                    }, false);
+                    item.addEventListener('pointercancel', cancelSwipe, false);
+                } else {
+                    item.addEventListener('touchstart', (event) => {
+                        if (event.touches && event.touches.length === 1) {
+                            const touch = event.touches[0];
+                            beginSwipe(0, touch.clientX, touch.clientY);
+                        }
+                    }, { passive: true });
+                    item.addEventListener('touchend', (event) => {
+                        if (event.changedTouches && event.changedTouches[0]) {
+                            const touch = event.changedTouches[0];
+                            endSwipe(0, touch.clientX, touch.clientY);
+                        }
+                    }, { passive: true });
+                    item.addEventListener('touchmove', (event) => {
+                        if (event.touches && event.touches[0]) {
+                            const touch = event.touches[0];
+                            moveSwipe(0, touch.clientX, touch.clientY);
+                        }
+                    }, { passive: true });
+                    item.addEventListener('touchcancel', cancelSwipe, { passive: true });
+                }
+            };
 
             const openGallery = () => {
                 if (galleryOpening) return;
@@ -764,20 +888,25 @@
 
             for (let index = 0; index < swaps.length; index += 1) {
                 const item = swaps[index];
+                installDirectGestures(item);
 
                 if (item === mainSwap) {
-                    item.addEventListener('click', openGallery);
-                } else {
-                    item.addEventListener('click', () => {
-                        const reveal = item.getAttribute('aria-pressed') !== 'true';
-                        item.setAttribute('aria-pressed', String(reveal));
-
-                        if (reveal) {
-                            item.classList.add('is-revealed');
-                            deepen();
-                        } else {
-                            item.classList.remove('is-revealed');
+                    item.addEventListener('click', (event) => {
+                        if (suppressedClicks.has(item)) {
+                            event.preventDefault();
+                            return;
                         }
+                        openGallery();
+                    });
+                } else {
+                    item.addEventListener('click', (event) => {
+                        if (suppressedClicks.has(item)) {
+                            event.preventDefault();
+                            return;
+                        }
+
+                        const reveal = item.getAttribute('aria-pressed') !== 'true';
+                        setReveal(item, reveal);
                     });
                 }
 
