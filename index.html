@@ -755,15 +755,26 @@
                         id,
                         x: clientX,
                         y: clientY,
-                        time: Date.now()
+                        time: Date.now(),
+                        handled: false
                     };
                 };
 
                 const moveSwipe = (id, clientX, clientY) => {
                     if (!swipeStart || swipeStart.id !== id) return;
 
-                    if (Math.abs(clientX - swipeStart.x) > 12 || Math.abs(clientY - swipeStart.y) > 12) {
+                    const deltaX = clientX - swipeStart.x;
+                    const deltaY = clientY - swipeStart.y;
+
+                    if (Math.abs(deltaX) > 12 || Math.abs(deltaY) > 12) {
                         disarmTouchTitle(item);
+                    }
+
+                    if (!swipeStart.handled &&
+                        Math.abs(deltaX) >= 32 &&
+                        Math.abs(deltaX) > Math.abs(deltaY) * 1.15) {
+                        swipeStart.handled = true;
+                        setReveal(item, deltaX < 0);
                     }
                 };
 
@@ -773,10 +784,13 @@
                     const deltaX = clientX - swipeStart.x;
                     const deltaY = clientY - swipeStart.y;
                     const heldFor = Date.now() - swipeStart.time;
+                    const handled = swipeStart.handled;
                     swipeStart = null;
                     disarmTouchTitle(item);
 
-                    if (Math.abs(deltaX) >= 45 && Math.abs(deltaX) > Math.abs(deltaY) * 1.2) {
+                    if (handled) {
+                        suppressNextClick(item);
+                    } else if (Math.abs(deltaX) >= 32 && Math.abs(deltaX) > Math.abs(deltaY) * 1.15) {
                         setReveal(item, deltaX < 0);
                         suppressNextClick(item);
                     } else if (heldFor >= 600) {
@@ -785,8 +799,29 @@
                 };
 
                 const cancelSwipe = () => {
+                    if (swipeStart && swipeStart.handled) suppressNextClick(item);
                     swipeStart = null;
                     disarmTouchTitle(item);
+                };
+
+                const capturePointer = (id) => {
+                    if (!item.setPointerCapture) return;
+                    try {
+                        item.setPointerCapture(id);
+                    } catch (error) {
+                        /* Older browsers can reject capture; movement detection still works. */
+                    }
+                };
+
+                const releasePointer = (id) => {
+                    if (!item.releasePointerCapture) return;
+                    try {
+                        if (!item.hasPointerCapture || item.hasPointerCapture(id)) {
+                            item.releasePointerCapture(id);
+                        }
+                    } catch (error) {
+                        /* Capture is also released automatically when the pointer ends. */
+                    }
                 };
 
                 item.addEventListener('contextmenu', (event) => {
@@ -800,11 +835,13 @@
                     item.addEventListener('pointerdown', (event) => {
                         if (event.pointerType !== 'mouse') {
                             beginSwipe(event.pointerId, event.clientX, event.clientY);
+                            capturePointer(event.pointerId);
                         }
                     }, false);
                     item.addEventListener('pointerup', (event) => {
                         if (event.pointerType !== 'mouse') {
                             endSwipe(event.pointerId, event.clientX, event.clientY);
+                            releasePointer(event.pointerId);
                         }
                     }, false);
                     item.addEventListener('pointermove', (event) => {
@@ -812,7 +849,10 @@
                             moveSwipe(event.pointerId, event.clientX, event.clientY);
                         }
                     }, false);
-                    item.addEventListener('pointercancel', cancelSwipe, false);
+                    item.addEventListener('pointercancel', (event) => {
+                        cancelSwipe();
+                        releasePointer(event.pointerId);
+                    }, false);
                 } else {
                     item.addEventListener('touchstart', (event) => {
                         if (event.touches && event.touches.length === 1) {
